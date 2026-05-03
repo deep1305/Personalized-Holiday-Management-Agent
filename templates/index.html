@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Personalized Holiday Management Agent</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <main class="page">
+        <header class="hero">
+            <div class="hero-top">
+                <p class="badge">AI Travel Assistant</p>
+                <button id="theme-toggle" type="button" class="secondary-btn">Dark Mode</button>
+            </div>
+            <h1>Plan Your Holiday in Minutes</h1>
+            <p class="subtitle">
+                Get destination ideas, itineraries, budget splits, and research-based cautions from your
+                planner + researcher workflow.
+            </p>
+        </header>
+
+        <section class="card">
+            <h2>Trip Preferences</h2>
+            <form id="trip-form">
+                <div class="grid">
+                    <label>
+                        <span>Month / Season</span>
+                        <input id="month" type="text" placeholder="June" required>
+                    </label>
+                    <label>
+                        <span>Duration (days)</span>
+                        <input id="days" type="number" min="1" placeholder="10" required>
+                    </label>
+                    <label>
+                        <span>Group Size</span>
+                        <input id="group_size" type="number" min="1" placeholder="4" required>
+                    </label>
+                    <label>
+                        <span>Total Budget</span>
+                        <input id="budget" type="text" placeholder="CAD 6000" required>
+                    </label>
+                </div>
+
+                <label class="full-width">
+                    <span>Preferences</span>
+                    <input id="preferences" type="text" placeholder="Mountains + sea, family-friendly, less crowded" required>
+                </label>
+
+                <label class="full-width">
+                    <span>Extra Notes (optional)</span>
+                    <textarea id="notes" rows="4" placeholder="Food preferences, visa limitations, activity level, etc."></textarea>
+                </label>
+
+                <button id="submit-btn" type="submit">Generate Travel Plan</button>
+            </form>
+        </section>
+
+        <section class="card">
+            <div class="result-head">
+                <h2>Agent Output</h2>
+                <div class="result-actions">
+                    <button id="copy-btn" type="button" class="secondary-btn" disabled>Copy Plan</button>
+                    <button id="download-btn" type="button" class="secondary-btn" disabled>Download .md</button>
+                    <p id="status" class="status">Fill the form and click Generate.</p>
+                </div>
+            </div>
+            <div id="output" class="output">
+                <p class="empty">No response yet.</p>
+            </div>
+        </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+    <script>
+        const form = document.getElementById("trip-form");
+        const output = document.getElementById("output");
+        const statusEl = document.getElementById("status");
+        const submitBtn = document.getElementById("submit-btn");
+        const copyBtn = document.getElementById("copy-btn");
+        const downloadBtn = document.getElementById("download-btn");
+        const themeToggle = document.getElementById("theme-toggle");
+        let latestAgentOutput = "";
+
+        function escapeHtml(text) {
+            return text
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;");
+        }
+
+        function renderMarkdown(content) {
+            const markdownHtml = marked.parse(content || "");
+            return DOMPurify.sanitize(markdownHtml);
+        }
+
+        function updateTheme(theme) {
+            document.documentElement.setAttribute("data-theme", theme);
+            themeToggle.textContent = theme === "dark" ? "Light Mode" : "Dark Mode";
+            localStorage.setItem("theme", theme);
+        }
+
+        const savedTheme = localStorage.getItem("theme") || "light";
+        updateTheme(savedTheme);
+
+        themeToggle.addEventListener("click", () => {
+            const currentTheme = document.documentElement.getAttribute("data-theme") || "light";
+            updateTheme(currentTheme === "light" ? "dark" : "light");
+        });
+
+        copyBtn.addEventListener("click", async () => {
+            if (!latestAgentOutput) return;
+            try {
+                await navigator.clipboard.writeText(latestAgentOutput);
+                statusEl.textContent = "Plan copied to clipboard.";
+            } catch {
+                statusEl.textContent = "Copy failed. Please copy manually.";
+            }
+        });
+
+        downloadBtn.addEventListener("click", () => {
+            if (!latestAgentOutput) return;
+            const blob = new Blob([latestAgentOutput], { type: "text/markdown;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "holiday-plan.md";
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            statusEl.textContent = "Plan downloaded.";
+        });
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+
+            const month = document.getElementById("month").value.trim();
+            const days = document.getElementById("days").value.trim();
+            const groupSize = document.getElementById("group_size").value.trim();
+            const budget = document.getElementById("budget").value.trim();
+            const preferences = document.getElementById("preferences").value.trim();
+            const notes = document.getElementById("notes").value.trim();
+
+            const prompt = [
+                `Suggest 3 destination options for a ${month} trip with these constraints:`,
+                `${days} days, group size ${groupSize}, total budget ${budget}, preferences: ${preferences}.`,
+                "For each option include: best area to stay, high-level day-wise itinerary, budget split (stay/food/local transport/activities), and practical travel tips.",
+                notes ? `Additional notes: ${notes}` : ""
+            ].filter(Boolean).join(" ");
+
+            statusEl.textContent = "Generating plan...";
+            submitBtn.disabled = true;
+            copyBtn.disabled = true;
+            downloadBtn.disabled = true;
+            output.innerHTML = "";
+            latestAgentOutput = "";
+
+            try {
+                const response = await fetch("/plan-trip", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        content: prompt,
+                        source: "user"
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Request failed with status ${response.status}`);
+                }
+
+                const data = await response.json();
+                const messages = data.messages || [];
+
+                if (!messages.length) {
+                    output.innerHTML = '<p class="empty">No messages returned.</p>';
+                    statusEl.textContent = "Completed with empty response.";
+                    return;
+                }
+
+                const agentMessages = messages.filter((msg) => msg.role !== "user");
+                latestAgentOutput = agentMessages
+                    .map((msg) => `## ${msg.role}\n\n${msg.content || ""}`)
+                    .join("\n\n---\n\n");
+
+                output.innerHTML = messages
+                    .map((msg) => `
+                        <article class="message ${msg.role === "user" ? "user" : "agent"}">
+                            <h3>${escapeHtml(msg.role)}</h3>
+                            <div class="message-content">
+                                ${msg.role === "user"
+                                    ? escapeHtml(msg.content || "").replaceAll("\n", "<br>")
+                                    : renderMarkdown(msg.content || "")}
+                            </div>
+                        </article>
+                    `)
+                    .join("");
+
+                statusEl.textContent = "Plan generated successfully.";
+                copyBtn.disabled = !latestAgentOutput;
+                downloadBtn.disabled = !latestAgentOutput;
+            } catch (error) {
+                output.innerHTML = `<p class="error">Error: ${escapeHtml(error.message)}</p>`;
+                statusEl.textContent = "Generation failed.";
+            } finally {
+                submitBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

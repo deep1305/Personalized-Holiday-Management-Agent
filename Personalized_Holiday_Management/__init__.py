@@ -1,0 +1,1 @@
+"""Personalized holiday management package."""

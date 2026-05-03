@@ -6,3 +6,8 @@ autogen-core
 pytest
 pydantic
 python-dotenv
+fastapi
+uvicorn
+jinja2
+
+-e .
